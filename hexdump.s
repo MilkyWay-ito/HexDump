@@ -1,5 +1,7 @@
 section .data
 hextab db "0123456789ABCDEF"
+usage db "usage: hexdump <fichier>", 10
+usagelen equ $ - usage
 
 section .bss
 inbuf resb 65536
@@ -68,6 +70,11 @@ _start:
         syscall
 
 .error:
+        mov rax, 1
+        mov rdi, 2
+        mov rsi, usage
+        mov rdx, usagelen
+        syscall
         mov rax, 60
         mov rdi, 1
         syscall
