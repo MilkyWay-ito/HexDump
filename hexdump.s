@@ -1,6 +1,6 @@
 section .data
 hextab db "0123456789ABCDEF"
-usage db "usage: hexdump <fichier>", 10
+usage db "usage: ./hexdump <fichier>", 10
 usagelen equ $ - usage
 
 section .bss
