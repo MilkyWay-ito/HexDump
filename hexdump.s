@@ -7,6 +7,7 @@ section .bss
 inbuf resb 65536
 outbuf resb 3
 offbuf resb 10
+asciibuf resb 16
 
 section .text
 global _start
@@ -22,7 +23,7 @@ _start:
         test rax, rax
         js .error
         mov r12, rax
-	xor r15, r15	
+        xor r15, r15
 
 .readloop:
         mov rax, 0
@@ -38,14 +39,13 @@ _start:
 .byteloop:
         cmp r14, r13
         jge .readloop
-	mov rbx, r15
+
+        mov rbx, r15
         and rbx, 15
         test rbx, rbx
         jnz .skipoffset
         call .print_offset
-
 .skipoffset:
-
         movzx rax, byte [inbuf + r14]
 
         mov rbx, rax
@@ -66,37 +66,52 @@ _start:
         mov rdx, 3
         syscall
 
+        movzx rax, byte [inbuf + r14]
+        cmp al, 0x20
+        jb .notprint
+        cmp al, 0x7E
+        jbe .isprint
+.notprint:
+        mov al, '.'
+.isprint:
+        mov rbx, r15
+        and rbx, 15
+        mov [asciibuf + rbx], al
+
         inc r15
         mov rbx, r15
         and rbx, 15
         test rbx, rbx
         jnz .nonewline
-
-        mov byte [outbuf], 10
-        mov rax, 1
-        mov rdi, 1
-        mov rsi, outbuf
-        mov rdx, 1
-        syscall
+        mov r8, 16
+        call .print_ascii
 .nonewline:
         inc r14
         jmp .byteloop
 
 .done:
-       mov rbx, r15
-       and rbx, 15
-       test rbx, rbx
-       jz .closefile
+        mov r8, r15
+        and r8, 15
+        test r8, r8
+        jz .closefile
 
-       mov byte [outbuf], 10
-       mov rax, 1
-       mov rdi, 1
-       mov rsi, outbuf
-       mov rdx, 1
-       syscall
+        mov r9, 16
+        sub r9, r8
+.padloop:
+        mov byte [outbuf], ' '
+        mov byte [outbuf + 1], ' '
+        mov byte [outbuf + 2], ' '
+        mov rax, 1
+        mov rdi, 1
+        mov rsi, outbuf
+        mov rdx, 3
+        syscall
+        dec r9
+        jnz .padloop
+
+        call .print_ascii
 
 .closefile:
-
         mov rax, 3
         mov rdi, r12
         syscall
@@ -134,5 +149,27 @@ _start:
         mov rdi, 1
         mov rsi, offbuf
         mov rdx, 10
+        syscall
+        ret
+
+.print_ascii:
+        mov byte [outbuf], ' '
+        mov rax, 1
+        mov rdi, 1
+        mov rsi, outbuf
+        mov rdx, 1
+        syscall
+
+        mov rax, 1
+        mov rdi, 1
+        mov rsi, asciibuf
+        mov rdx, r8
+        syscall
+
+        mov byte [outbuf], 10
+        mov rax, 1
+        mov rdi, 1
+        mov rsi, outbuf
+        mov rdx, 1
         syscall
         ret
