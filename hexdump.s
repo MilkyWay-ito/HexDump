@@ -2,6 +2,7 @@ section .data
 hextab db "0123456789ABCDEF"
 usage db "usage: ./hexdump <fichier>", 10
 usagelen equ $ - usage
+star db "*", 10
 
 colors db 27, "[90m", 27, "[32m", 27, "[33m", 27, "[34m", 27, "[31m"
 reset db 27, "[0m"
@@ -29,6 +30,10 @@ asciibuf resb 16
 asciicol resb 16
 asciiout resb 128
 termios resb 64
+curline resb 16
+prevline resb 16
+haveprev resb 1
+starflag resb 1
 
 section .text
 global _start
@@ -77,65 +82,17 @@ _start:
 
         mov rbx, r15
         and rbx, 15
-        test rbx, rbx
-        jnz .skipoffset
-        call .print_offset
-.skipoffset:
-        movzx rax, byte [inbuf + r14]
-        call .classify
-        mov rbx, r15
-        and rbx, 15
-        mov [asciicol + rbx], cl
-
-        lea rdx, [rcx + rcx*4]
-        mov r9d, [colors + rdx]
-        mov [outbuf], r9d
-        mov r9b, [colors + rdx + 4]
-        mov [outbuf + 4], r9b
-
-        mov rbx, rax
-        shr rbx, 4
-        mov r9b, [hextab + rbx]
-        mov [outbuf + 5], r9b
-
-        mov rbx, rax
-        and rbx, 0x0F
-        mov r9b, [hextab + rbx]
-        mov [outbuf + 6], r9b
-
-        mov byte [outbuf + 7], ' '
-
-        mov rax, 1
-        mov rdi, 1
-        mov rsi, outbuf
-        mov rdx, 8
-        test rbp, rbp
-        jnz .writehex
-        mov rsi, outbuf + 5
-        mov rdx, 3
-.writehex:
-        syscall
-
-        movzx rax, byte [inbuf + r14]
-        cmp al, 0x20
-        jb .notprint
-        cmp al, 0x7E
-        jbe .isprint
-.notprint:
-        mov al, '.'
-.isprint:
-        mov rbx, r15
-        and rbx, 15
-        mov [asciibuf + rbx], al
+        mov al, [inbuf + r14]
+        mov [curline + rbx], al
 
         inc r15
         mov rbx, r15
         and rbx, 15
         test rbx, rbx
-        jnz .nonewline
+        jnz .nextbyte
         mov r8, 16
-        call .print_ascii
-.nonewline:
+        call .emit_line
+.nextbyte:
         inc r14
         jmp .byteloop
 
@@ -143,23 +100,21 @@ _start:
         mov r8, r15
         and r8, 15
         test r8, r8
-        jz .closefile
+        jz .checkstar
+        call .emit_line
+        jmp .closefile
 
-        mov r9, 16
-        sub r9, r8
-.padloop:
-        mov byte [outbuf], ' '
-        mov byte [outbuf + 1], ' '
-        mov byte [outbuf + 2], ' '
+.checkstar:
+        cmp byte [starflag], 0
+        je .closefile
+        mov r9, r15
+        call .fill_offset
+        mov byte [offbuf + 8], 10
         mov rax, 1
         mov rdi, 1
-        mov rsi, outbuf
-        mov rdx, 3
+        mov rsi, offbuf
+        mov rdx, 9
         syscall
-        dec r9
-        jnz .padloop
-
-        call .print_ascii
 
 .closefile:
         mov rax, 3
@@ -179,6 +134,109 @@ _start:
         mov rax, 60
         mov rdi, 1
         syscall
+
+.emit_line:
+        cmp r8, 16
+        jne .emit_print
+        cmp byte [haveprev], 0
+        je .emit_print
+        mov rax, [curline]
+        cmp rax, [prevline]
+        jne .emit_print
+        mov rax, [curline + 8]
+        cmp rax, [prevline + 8]
+        jne .emit_print
+
+        cmp byte [starflag], 0
+        jne .emit_ret
+        mov byte [starflag], 1
+        mov rax, 1
+        mov rdi, 1
+        mov rsi, star
+        mov rdx, 2
+        syscall
+.emit_ret:
+        ret
+
+.emit_print:
+        mov byte [starflag], 0
+        mov r9, r15
+        sub r9, r8
+        call .print_offset
+
+        xor r10, r10
+.emit_byte:
+        cmp r10, r8
+        jge .emit_pad
+
+        movzx rax, byte [curline + r10]
+        call .classify
+        mov [asciicol + r10], cl
+
+        lea rdx, [rcx + rcx*4]
+        mov r9d, [colors + rdx]
+        mov [outbuf], r9d
+        mov r9b, [colors + rdx + 4]
+        mov [outbuf + 4], r9b
+
+        mov rbx, rax
+        shr rbx, 4
+        mov r9b, [hextab + rbx]
+        mov [outbuf + 5], r9b
+
+        mov rbx, rax
+        and rbx, 0x0F
+        mov r9b, [hextab + rbx]
+        mov [outbuf + 6], r9b
+
+        mov byte [outbuf + 7], ' '
+
+        cmp al, 0x20
+        jb .emit_dot
+        cmp al, 0x7E
+        jbe .emit_char
+.emit_dot:
+        mov al, '.'
+.emit_char:
+        mov [asciibuf + r10], al
+
+        mov rax, 1
+        mov rdi, 1
+        mov rsi, outbuf
+        mov rdx, 8
+        test rbp, rbp
+        jnz .emit_write
+        mov rsi, outbuf + 5
+        mov rdx, 3
+.emit_write:
+        syscall
+
+        inc r10
+        jmp .emit_byte
+
+.emit_pad:
+        cmp r10, 16
+        jge .emit_ascii
+        mov byte [outbuf], ' '
+        mov byte [outbuf + 1], ' '
+        mov byte [outbuf + 2], ' '
+        mov rax, 1
+        mov rdi, 1
+        mov rsi, outbuf
+        mov rdx, 3
+        syscall
+        inc r10
+        jmp .emit_pad
+
+.emit_ascii:
+        call .print_ascii
+
+        mov rax, [curline]
+        mov [prevline], rax
+        mov rax, [curline + 8]
+        mov [prevline + 8], rax
+        mov byte [haveprev], 1
+        ret
 
 .classify:
         xor ecx, ecx
@@ -252,8 +310,7 @@ _start:
         syscall
         ret
 
-.print_offset:
-        mov r9, r15
+.fill_offset:
         mov rcx, 8
 .offloop:
         dec rcx
@@ -264,7 +321,10 @@ _start:
         shr r9, 4
         test rcx, rcx
         jnz .offloop
+        ret
 
+.print_offset:
+        call .fill_offset
         mov byte [offbuf + 8], ':'
         mov byte [offbuf + 9], ' '
         mov rax, 1
