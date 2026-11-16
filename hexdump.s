@@ -21,6 +21,7 @@ _start:
         test rax, rax
         js .error
         mov r12, rax
+	xor r15, r15	
 
 .readloop:
         mov rax, 0
@@ -57,6 +58,19 @@ _start:
         mov rdx, 3
         syscall
 
+        inc r15
+        mov rbx, r15
+        and rbx, 15
+        test rbx, rbx
+        jnz .nonewline
+
+        mov byte [outbuf], 10
+        mov rax, 1
+        mov rdi, 1
+        mov rsi, outbuf
+        mov rdx, 1
+        syscall
+.nonewline:
         inc r14
         jmp .byteloop
 
