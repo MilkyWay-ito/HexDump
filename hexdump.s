@@ -83,6 +83,20 @@ _start:
         jmp .byteloop
 
 .done:
+       mov rbx, r15
+       and rbx, 15
+       test rbx, rbx
+       jz .closefile
+
+       mov byte [outbuf], 10
+       mov rax, 1
+       mov rdi, 1
+       mov rsi, outbuf
+       mov rdx, 1
+       syscall
+
+.closefile:
+
         mov rax, 3
         mov rdi, r12
         syscall
