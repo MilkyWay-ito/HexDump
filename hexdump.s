@@ -6,6 +6,7 @@ usagelen equ $ - usage
 section .bss
 inbuf resb 65536
 outbuf resb 3
+offbuf resb 10
 
 section .text
 global _start
@@ -37,6 +38,13 @@ _start:
 .byteloop:
         cmp r14, r13
         jge .readloop
+	mov rbx, r15
+        and rbx, 15
+        test rbx, rbx
+        jnz .skipoffset
+        call .print_offset
+
+.skipoffset:
 
         movzx rax, byte [inbuf + r14]
 
@@ -92,3 +100,25 @@ _start:
         mov rax, 60
         mov rdi, 1
         syscall
+
+.print_offset:
+        mov r9, r15
+        mov rcx, 8
+.offloop:
+        dec rcx
+        mov rbx, r9
+        and rbx, 0x0F
+        mov al, [hextab + rbx]
+        mov [offbuf + rcx], al
+        shr r9, 4
+        test rcx, rcx
+        jnz .offloop
+
+        mov byte [offbuf + 8], ':'
+        mov byte [offbuf + 9], ' '
+        mov rax, 1
+        mov rdi, 1
+        mov rsi, offbuf
+        mov rdx, 10
+        syscall
+        ret
