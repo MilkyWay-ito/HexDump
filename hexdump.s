@@ -3,11 +3,32 @@ hextab db "0123456789ABCDEF"
 usage db "usage: ./hexdump <fichier>", 10
 usagelen equ $ - usage
 
+colors db 27, "[90m", 27, "[32m", 27, "[33m", 27, "[34m", 27, "[31m"
+reset db 27, "[0m"
+
+m_elf64 db "Format : ELF 64-bit", 10
+m_elf64_len equ $ - m_elf64
+m_elf32 db "Format : ELF 32-bit", 10
+m_elf32_len equ $ - m_elf32
+m_png db "Format : PNG", 10
+m_png_len equ $ - m_png
+m_pdf db "Format : PDF", 10
+m_pdf_len equ $ - m_pdf
+m_zip db "Format : ZIP", 10
+m_zip_len equ $ - m_zip
+m_gif db "Format : GIF", 10
+m_gif_len equ $ - m_gif
+m_unknown db "Format : inconnu", 10
+m_unknown_len equ $ - m_unknown
+
 section .bss
 inbuf resb 65536
-outbuf resb 3
+outbuf resb 8
 offbuf resb 10
 asciibuf resb 16
+asciicol resb 16
+asciiout resb 128
+termios resb 64
 
 section .text
 global _start
@@ -25,6 +46,16 @@ _start:
         mov r12, rax
         xor r15, r15
 
+        mov rax, 16
+        mov rdi, 1
+        mov rsi, 0x5401
+        mov rdx, termios
+        syscall
+        xor rbp, rbp
+        test rax, rax
+        jnz .readloop
+        mov rbp, 1
+
 .readloop:
         mov rax, 0
         mov rdi, r12
@@ -35,6 +66,10 @@ _start:
         jle .done
         mov r13, rax
 
+        test r15, r15
+        jnz .skipmagic
+        call .detect_magic
+.skipmagic:
         xor r14, r14
 .byteloop:
         cmp r14, r13
@@ -47,23 +82,38 @@ _start:
         call .print_offset
 .skipoffset:
         movzx rax, byte [inbuf + r14]
+        call .classify
+        mov rbx, r15
+        and rbx, 15
+        mov [asciicol + rbx], cl
+
+        lea rdx, [rcx + rcx*4]
+        mov r9d, [colors + rdx]
+        mov [outbuf], r9d
+        mov r9b, [colors + rdx + 4]
+        mov [outbuf + 4], r9b
 
         mov rbx, rax
         shr rbx, 4
-        mov cl, [hextab + rbx]
-        mov [outbuf], cl
+        mov r9b, [hextab + rbx]
+        mov [outbuf + 5], r9b
 
         mov rbx, rax
         and rbx, 0x0F
-        mov cl, [hextab + rbx]
-        mov [outbuf + 1], cl
+        mov r9b, [hextab + rbx]
+        mov [outbuf + 6], r9b
 
-        mov byte [outbuf + 2], ' '
+        mov byte [outbuf + 7], ' '
 
         mov rax, 1
         mov rdi, 1
         mov rsi, outbuf
+        mov rdx, 8
+        test rbp, rbp
+        jnz .writehex
+        mov rsi, outbuf + 5
         mov rdx, 3
+.writehex:
         syscall
 
         movzx rax, byte [inbuf + r14]
@@ -130,6 +180,78 @@ _start:
         mov rdi, 1
         syscall
 
+.classify:
+        xor ecx, ecx
+        test al, al
+        jz .clsdone
+        mov ecx, 3
+        cmp al, 0xFF
+        je .clsdone
+        mov ecx, 2
+        cmp al, 0x09
+        je .clsdone
+        cmp al, 0x0A
+        je .clsdone
+        cmp al, 0x0D
+        je .clsdone
+        mov ecx, 1
+        cmp al, 0x20
+        jb .clsother
+        cmp al, 0x7E
+        jbe .clsdone
+.clsother:
+        mov ecx, 4
+.clsdone:
+        ret
+
+.detect_magic:
+        cmp r13, 4
+        jl .fmt_unknown
+        cmp dword [inbuf], 0x464C457F
+        je .fmt_elf
+        cmp dword [inbuf], 0x474E5089
+        je .fmt_png
+        cmp dword [inbuf], 0x46445025
+        je .fmt_pdf
+        cmp dword [inbuf], 0x04034B50
+        je .fmt_zip
+        cmp dword [inbuf], 0x38464947
+        je .fmt_gif
+.fmt_unknown:
+        mov rsi, m_unknown
+        mov rdx, m_unknown_len
+        jmp .fmt_print
+.fmt_elf:
+        mov rsi, m_elf64
+        mov rdx, m_elf64_len
+        cmp r13, 5
+        jl .fmt_print
+        cmp byte [inbuf + 4], 2
+        je .fmt_print
+        mov rsi, m_elf32
+        mov rdx, m_elf32_len
+        jmp .fmt_print
+.fmt_png:
+        mov rsi, m_png
+        mov rdx, m_png_len
+        jmp .fmt_print
+.fmt_pdf:
+        mov rsi, m_pdf
+        mov rdx, m_pdf_len
+        jmp .fmt_print
+.fmt_zip:
+        mov rsi, m_zip
+        mov rdx, m_zip_len
+        jmp .fmt_print
+.fmt_gif:
+        mov rsi, m_gif
+        mov rdx, m_gif_len
+.fmt_print:
+        mov rax, 1
+        mov rdi, 1
+        syscall
+        ret
+
 .print_offset:
         mov r9, r15
         mov rcx, 8
@@ -153,23 +275,41 @@ _start:
         ret
 
 .print_ascii:
-        mov byte [outbuf], ' '
+        mov rdi, asciiout
+        mov byte [rdi], ' '
+        inc rdi
+        xor r9, r9
+.aloop:
+        cmp r9, r8
+        jge .aend
+        test rbp, rbp
+        jz .nocol
+        movzx rdx, byte [asciicol + r9]
+        lea rdx, [rdx + rdx*4]
+        mov r10d, [colors + rdx]
+        mov [rdi], r10d
+        mov r10b, [colors + rdx + 4]
+        mov [rdi + 4], r10b
+        add rdi, 5
+.nocol:
+        mov r10b, [asciibuf + r9]
+        mov [rdi], r10b
+        inc rdi
+        inc r9
+        jmp .aloop
+.aend:
+        test rbp, rbp
+        jz .noreset
+        mov r10d, [reset]
+        mov [rdi], r10d
+        add rdi, 4
+.noreset:
+        mov byte [rdi], 10
+        inc rdi
+        mov rdx, rdi
+        sub rdx, asciiout
         mov rax, 1
         mov rdi, 1
-        mov rsi, outbuf
-        mov rdx, 1
-        syscall
-
-        mov rax, 1
-        mov rdi, 1
-        mov rsi, asciibuf
-        mov rdx, r8
-        syscall
-
-        mov byte [outbuf], 10
-        mov rax, 1
-        mov rdi, 1
-        mov rsi, outbuf
-        mov rdx, 1
+        mov rsi, asciiout
         syscall
         ret
