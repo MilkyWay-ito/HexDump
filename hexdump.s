@@ -22,6 +22,19 @@ m_gif_len equ $ - m_gif
 m_unknown db "Format : inconnu", 10
 m_unknown_len equ $ - m_unknown
 
+pfx db "./hexdump: "
+pfxlen equ $ - pfx
+e_noent db ": fichier introuvable", 10
+e_noent_len equ $ - e_noent
+e_acces db ": permission refusée", 10
+e_acces_len equ $ - e_acces
+e_isdir db ": c'est un dossier", 10
+e_isdir_len equ $ - e_isdir
+e_open db ": impossible d'ouvrir le fichier", 10
+e_open_len equ $ - e_open
+e_read db ": erreur de lecture", 10
+e_read_len equ $ - e_read
+
 section .bss
 inbuf resb 65536
 outbuf resb 8
@@ -47,7 +60,7 @@ _start:
         xor rdx, rdx
         syscall
         test rax, rax
-        js .error
+        js .openerror
         mov r12, rax
         xor r15, r15
 
@@ -68,7 +81,8 @@ _start:
         mov rdx, 65536
         syscall
         test rax, rax
-        jle .done
+        jz .done
+        js .readerror
         mov r13, rax
 
         test r15, r15
@@ -131,6 +145,63 @@ _start:
         mov rsi, usage
         mov rdx, usagelen
         syscall
+        mov rax, 60
+        mov rdi, 1
+        syscall
+
+.openerror:
+        neg rax
+        mov rsi, e_open
+        mov rdx, e_open_len
+        cmp rax, 2
+        jne .oe_acces
+        mov rsi, e_noent
+        mov rdx, e_noent_len
+        jmp .syserr
+.oe_acces:
+        cmp rax, 13
+        jne .syserr
+        mov rsi, e_acces
+        mov rdx, e_acces_len
+        jmp .syserr
+
+.readerror:
+        neg rax
+        mov rsi, e_read
+        mov rdx, e_read_len
+        cmp rax, 21
+        jne .syserr
+        mov rsi, e_isdir
+        mov rdx, e_isdir_len
+
+.syserr:
+        mov r14, rsi
+        mov r13, rdx
+
+        mov rax, 1
+        mov rdi, 2
+        mov rsi, pfx
+        mov rdx, pfxlen
+        syscall
+
+        mov rsi, [rsp+16]
+        xor rdx, rdx
+.slen:
+        cmp byte [rsi + rdx], 0
+        je .slend
+        inc rdx
+        jmp .slen
+.slend:
+        mov rax, 1
+        mov rdi, 2
+        syscall
+
+        mov rax, 1
+        mov rdi, 2
+        mov rsi, r14
+        mov rdx, r13
+        syscall
+
         mov rax, 60
         mov rdi, 1
         syscall
